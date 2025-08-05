@@ -1,5 +1,9 @@
 pipeline {
     agent any
+    options {
+        skipDefaultCheckout(false) // Siempre realiza el checkout
+        disableConcurrentBuilds()  // Evita conflictos si corres builds seguidos
+    }
     stages {
         stage('Checkout') {
             steps {
