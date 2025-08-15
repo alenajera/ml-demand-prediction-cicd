@@ -1,6 +1,11 @@
 pipeline {
   agent any
 
+  // Fuerza la herramienta Git que definiste en Manage Jenkins → Tools
+  tools { git 'Default' }
+
+  options { timestamps() }
+
   environment {
     IMAGE_NAME     = 'ml-demand-api'
     CONTAINER_NAME = 'ml_demand_test'
@@ -8,14 +13,35 @@ pipeline {
   }
 
   stages {
+    stage('Prepare workspace (clean)') {
+      steps {
+        // Limpia completamente el workspace (borra .git corrupto si existe)
+        deleteDir()
+        sh 'pwd && ls -la'
+      }
+    }
+
     stage('Checkout') {
       steps {
-        git branch: 'main', url: 'https://github.com/alenajera/ml-demand-prediction-cicd.git'
+        // Checkout robusto con extensiones
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: '*/main']],
+          doGenerateSubmoduleConfigurations: false,
+          extensions: [
+            [$class: 'CleanBeforeCheckout']    // git clean -fdx antes de bajar
+          ],
+          userRemoteConfigs: [[
+            url: 'https://github.com/alenajera/ml-demand-prediction-cicd.git',
+            credentialsId: 'github-pat'
+          ]]
+        ])
       }
     }
 
     stage('Build Docker Image') {
       steps {
+        sh 'docker version || true'
         sh 'docker build -t ml-demand-api -f docker/Dockerfile .'
       }
     }
@@ -33,7 +59,8 @@ pipeline {
       steps {
         sh '''
           sleep 5
-          curl -s -X POST $TEST_URL \
+          echo "Calling $TEST_URL"
+          curl -v -s -X POST $TEST_URL \
             -H "Content-Type: application/json" \
             -d '{"price":9.0,"ads_spent":750}'
         '''
@@ -42,14 +69,16 @@ pipeline {
 
     stage('Cleanup') {
       steps {
-        sh 'docker stop $CONTAINER_NAME && docker rm $CONTAINER_NAME'
+        sh 'docker stop $CONTAINER_NAME >/dev/null 2>&1 || true'
+        sh 'docker rm   $CONTAINER_NAME >/dev/null 2>&1 || true'
       }
     }
   }
 
   post {
     always {
-      sh 'docker image ls | head -n 10'
+      sh 'echo "--- Images top ---"; docker image ls | head -n 10 || true'
+      sh 'echo "--- Containers ---"; docker ps -a | head -n 10 || true'
     }
   }
 }
